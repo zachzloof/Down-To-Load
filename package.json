@@ -1,0 +1,43 @@
+{
+  "name": "down-to-load",
+  "version": "1.0.0",
+  "description": "Sort your downloads with style",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env NODE_ENV=development electron .\"",
+    "build": "vite build",
+    "dist": "npm run build && electron-builder",
+    "preview": "vite preview"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^30.0.1",
+    "electron-builder": "^24.13.3",
+    "lucide-vue-next": "^0.399.0",
+    "pinia": "^2.1.7",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.3",
+    "vite": "^5.2.8",
+    "vue": "^3.4.21",
+    "vue-router": "^4.3.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.downtoload.app",
+    "productName": "Down-To-Load",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": ["nsis", "portable"]
+    }
+  }
+}
