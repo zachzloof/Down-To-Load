@@ -131,6 +131,24 @@ ipcMain.handle('move-files', async (_, { filePaths, destFolder }) => {
   return results
 })
 
+ipcMain.handle('read-file-buffer', (_, filePath) => {
+  return fs.readFileSync(filePath)
+})
+
+ipcMain.handle('rename-file', (_, { oldPath, newName }) => {
+  try {
+    const dir = path.dirname(oldPath)
+    const newPath = path.join(dir, newName)
+    if (fs.existsSync(newPath)) {
+      return { success: false, error: 'A file with that name already exists' }
+    }
+    fs.renameSync(oldPath, newPath)
+    return { success: true, newPath }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
 // ── Dialogs / shell ───────────────────────────────────────────────────────────
 
 ipcMain.handle('select-folder', async () => {

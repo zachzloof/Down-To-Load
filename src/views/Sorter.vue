@@ -73,13 +73,13 @@
         <div
           v-for="file in filteredFiles"
           :key="file.path"
-          @click="toggleSelect(file.path)"
+          @click="handleCardClick(file)"
           class="relative flex flex-col p-3.5 rounded-xl border cursor-pointer select-none transition-all group"
           :class="selection.has(file.path)
             ? 'bg-violet-600/10 border-violet-500/50 shadow-md shadow-violet-950/20'
             : 'bg-slate-800/50 border-slate-700/40 hover:bg-slate-800 hover:border-slate-600/60'"
         >
-          <!-- Checkbox -->
+          <!-- Checkbox (top-right) -->
           <div class="absolute top-2.5 right-2.5">
             <div
               class="w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all"
@@ -91,21 +91,74 @@
             </div>
           </div>
 
-          <!-- Extension badge -->
+          <!-- Extension badge (with play/pause overlay for audio) -->
           <div
-            class="w-11 h-11 rounded-xl flex items-center justify-center mb-3 text-xs font-bold uppercase tracking-wider flex-none"
+            class="relative w-11 h-11 rounded-xl flex items-center justify-center mb-3 text-xs font-bold uppercase tracking-wider flex-none overflow-hidden"
             :style="{ background: catFor(file).darkBg, color: catFor(file).color }"
           >
             {{ file.ext || '?' }}
+            <button
+              v-if="isAudio(file)"
+              @click.stop="togglePlay(file)"
+              class="absolute inset-0 flex items-center justify-center bg-black/55 transition-opacity"
+              :class="playingPath === file.path ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
+              title="Play / Pause"
+            >
+              <Play v-if="playingPath !== file.path" :size="16" class="text-white" :fill="'white'" />
+              <Pause v-else :size="16" class="text-white" :fill="'white'" />
+            </button>
           </div>
 
-          <!-- Info -->
-          <p class="text-sm font-medium text-slate-200 truncate leading-tight" :title="file.name">
-            {{ file.name }}
-          </p>
+          <!-- Filename / inline rename -->
+          <div v-if="editingPath === file.path" class="flex items-center gap-1 mt-0" @click.stop>
+            <input
+              :ref="el => { if (el) el.focus() }"
+              v-model="editName"
+              class="text-sm font-medium text-slate-200 bg-transparent border-0 border-b border-violet-400 outline-none w-full leading-tight px-0 min-w-0"
+              @keydown.enter.prevent="saveEdit(file)"
+              @keydown.escape="cancelEdit()"
+              @blur="cancelEdit()"
+              @click.stop
+            />
+            <span v-if="file.ext" class="text-xs text-slate-500 flex-none">.{{ file.ext }}</span>
+          </div>
+          <div v-else class="flex items-center gap-1 min-w-0">
+            <p class="text-sm font-medium text-slate-200 truncate leading-tight flex-1 min-w-0" :title="file.name">
+              {{ file.name }}
+            </p>
+            <button
+              @click.stop="startEdit(file)"
+              class="flex-none text-slate-600 hover:text-violet-400 transition-colors shrink-0"
+              title="Rename"
+            >
+              <Pencil :size="11" />
+            </button>
+          </div>
+
           <div class="flex items-center justify-between mt-1.5 gap-1">
             <span class="text-xs text-slate-600 flex-none">{{ formatFileSize(file.size) }}</span>
             <span class="text-xs text-slate-700 truncate text-right">{{ formatDate(file.modified) }}</span>
+          </div>
+
+          <!-- Audio progress bar -->
+          <div
+            v-if="isAudio(file) && playingPath === file.path"
+            class="mt-2"
+            @click.stop
+          >
+            <div
+              class="w-full h-1 bg-slate-700 rounded-full cursor-pointer hover:h-1.5 transition-all duration-100"
+              @click.stop="seekAudio($event)"
+            >
+              <div
+                class="h-full bg-violet-500 rounded-full pointer-events-none"
+                :style="{ width: audioDuration ? (audioCurrentTime / audioDuration * 100) + '%' : '0%' }"
+              />
+            </div>
+            <div class="flex justify-between mt-0.5">
+              <span class="text-[10px] text-slate-600">{{ formatDuration(audioCurrentTime) }}</span>
+              <span class="text-[10px] text-slate-600">{{ formatDuration(audioDuration) }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -207,10 +260,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import {
   RefreshCw, Check, X, Inbox, AlertCircle,
-  MoveRight, FolderOpen, ArrowRight,
+  MoveRight, FolderOpen, ArrowRight, Pencil, Play, Pause,
 } from 'lucide-vue-next'
 import { useAppStore } from '../stores/appStore.js'
 import { useNotifications } from '../composables/useNotifications.js'
@@ -222,13 +275,21 @@ import {
 const appStore = useAppStore()
 const { notify } = useNotifications()
 
-const files       = ref([])
-const loading     = ref(false)
-const error       = ref(null)
+const files        = ref([])
+const loading      = ref(false)
+const error        = ref(null)
 const activeFilter = ref('all')
-const selection   = ref(new Set())
-const showModal   = ref(false)
-const moving      = ref(false)
+const selection    = ref(new Set())
+const showModal    = ref(false)
+const moving       = ref(false)
+
+const editingPath     = ref(null)
+const editName        = ref('')
+const playingPath     = ref(null)
+const audioCurrentTime = ref(0)
+const audioDuration   = ref(0)
+let audioInstance     = null
+let audioBlobUrl      = null
 
 // ── Computed ─────────────────────────────────────────────────────────────────
 
@@ -260,7 +321,16 @@ function catFor(file) {
   return getCategoryConfig(getFileCategory(file.ext))
 }
 
+function isAudio(file) {
+  return getFileCategory(file.ext) === 'audio'
+}
+
 // ── Selection ─────────────────────────────────────────────────────────────────
+
+function handleCardClick(file) {
+  if (editingPath.value === file.path) return
+  toggleSelect(file.path)
+}
 
 function toggleSelect(path) {
   const s = new Set(selection.value)
@@ -276,10 +346,107 @@ function toggleSelectAll() {
   }
 }
 
+// ── Audio playback ────────────────────────────────────────────────────────────
+
+function stopAudio() {
+  if (audioInstance) {
+    audioInstance.pause()
+    audioInstance = null
+  }
+  if (audioBlobUrl) {
+    URL.revokeObjectURL(audioBlobUrl)
+    audioBlobUrl = null
+  }
+  playingPath.value = null
+  audioCurrentTime.value = 0
+  audioDuration.value = 0
+}
+
+async function togglePlay(file) {
+  if (playingPath.value === file.path) {
+    stopAudio()
+    return
+  }
+  stopAudio()
+  try {
+    const buffer = await window.electronAPI.readFileBuffer(file.path)
+    const blob = new Blob([buffer])
+    const url = URL.createObjectURL(blob)
+    audioBlobUrl = url
+    const audio = new Audio(url)
+    audio.addEventListener('loadedmetadata', () => { audioDuration.value = audio.duration })
+    audio.addEventListener('timeupdate', () => { audioCurrentTime.value = audio.currentTime })
+    audio.addEventListener('ended', () => { if (playingPath.value === file.path) stopAudio() })
+    await audio.play()
+    audioInstance = audio
+    playingPath.value = file.path
+  } catch {
+    if (audioBlobUrl) { URL.revokeObjectURL(audioBlobUrl); audioBlobUrl = null }
+    notify({ type: 'error', title: 'Could not play audio' })
+    playingPath.value = null
+  }
+}
+
+function seekAudio(event) {
+  if (!audioInstance) return
+  const rect = event.currentTarget.getBoundingClientRect()
+  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+  audioInstance.currentTime = ratio * audioDuration.value
+}
+
+function formatDuration(seconds) {
+  if (!seconds || isNaN(seconds)) return '0:00'
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+// ── Rename ────────────────────────────────────────────────────────────────────
+
+function startEdit(file) {
+  const suffix = file.ext ? `.${file.ext}` : ''
+  editName.value = suffix ? file.name.slice(0, -suffix.length) : file.name
+  editingPath.value = file.path
+}
+
+async function saveEdit(file) {
+  const suffix = file.ext ? `.${file.ext}` : ''
+  const newBaseName = editName.value.trim().replace(/[\\/:*?"<>|]/g, '')
+  const newName = newBaseName + suffix
+  if (!newBaseName || newName === file.name) {
+    editingPath.value = null
+    return
+  }
+  const result = await window.electronAPI.renameFile({ oldPath: file.path, newName })
+  if (result.success) {
+    const f = files.value.find(f => f.path === file.path)
+    if (f) {
+      if (selection.value.has(f.path)) {
+        const s = new Set(selection.value)
+        s.delete(f.path)
+        s.add(result.newPath)
+        selection.value = s
+      }
+      if (playingPath.value === f.path) playingPath.value = result.newPath
+      f.name = newName
+      f.path = result.newPath
+    }
+    notify({ type: 'success', title: 'File renamed' })
+  } else {
+    notify({ type: 'error', title: 'Rename failed', message: result.error })
+  }
+  editingPath.value = null
+}
+
+function cancelEdit() {
+  editingPath.value = null
+}
+
 // ── Load files ────────────────────────────────────────────────────────────────
 
 async function loadFiles() {
   if (!appStore.config?.downloadsFolder) return
+  stopAudio()
   loading.value = true
   error.value   = null
   selection.value = new Set()
@@ -328,4 +495,5 @@ watch(() => appStore.config?.downloadsFolder, (folder) => {
 })
 
 onMounted(loadFiles)
+onUnmounted(stopAudio)
 </script>
