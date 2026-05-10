@@ -31,6 +31,26 @@
         <span v-if="selection.size" class="ml-3 text-violet-400 font-medium">{{ selection.size }} selected</span>
       </p>
       <div class="flex items-center gap-1">
+        <div class="flex items-center gap-1 border-r border-slate-800 pr-2 mr-1">
+          <span class="text-xs text-slate-600">Sort</span>
+          <select
+            v-model="sortBy"
+            class="bg-slate-800 border border-slate-700/60 text-slate-400 text-xs rounded-lg px-2 py-1 cursor-pointer focus:outline-none hover:border-slate-600 hover:text-slate-300 transition-colors"
+          >
+            <option value="modified">Date</option>
+            <option value="name">Name</option>
+            <option value="size">Size</option>
+            <option value="ext">Type</option>
+          </select>
+          <button
+            @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'"
+            :title="sortOrder === 'asc' ? 'Ascending' : 'Descending'"
+            class="p-1.5 text-slate-600 hover:text-slate-300 hover:bg-slate-800 rounded-lg transition-all"
+          >
+            <ArrowUp v-if="sortOrder === 'asc'" :size="13" />
+            <ArrowDown v-else :size="13" />
+          </button>
+        </div>
         <button
           v-if="filteredFiles.length"
           @click="toggleSelectAll"
@@ -264,6 +284,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import {
   RefreshCw, Check, X, Inbox, AlertCircle,
   MoveRight, FolderOpen, ArrowRight, Pencil, Play, Pause,
+  ArrowUp, ArrowDown,
 } from 'lucide-vue-next'
 import { useAppStore } from '../stores/appStore.js'
 import { useNotifications } from '../composables/useNotifications.js'
@@ -279,6 +300,8 @@ const files        = ref([])
 const loading      = ref(false)
 const error        = ref(null)
 const activeFilter = ref('all')
+const sortBy       = ref('modified')
+const sortOrder    = ref('desc')
 const selection    = ref(new Set())
 const showModal    = ref(false)
 const moving       = ref(false)
@@ -311,11 +334,25 @@ const filters = computed(() => {
   return items
 })
 
-const filteredFiles = computed(() =>
-  activeFilter.value === 'all'
+const filteredFiles = computed(() => {
+  const list = activeFilter.value === 'all'
     ? files.value
     : files.value.filter(f => getFileCategory(f.ext) === activeFilter.value)
-)
+  return [...list].sort((a, b) => {
+    let cmp = 0
+    if (sortBy.value === 'name') {
+      cmp = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+    } else if (sortBy.value === 'size') {
+      cmp = a.size - b.size
+    } else if (sortBy.value === 'ext') {
+      cmp = (a.ext || '').localeCompare(b.ext || '', undefined, { sensitivity: 'base' })
+      if (cmp === 0) cmp = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+    } else {
+      cmp = new Date(a.modified) - new Date(b.modified)
+    }
+    return sortOrder.value === 'asc' ? cmp : -cmp
+  })
+})
 
 function catFor(file) {
   return getCategoryConfig(getFileCategory(file.ext))

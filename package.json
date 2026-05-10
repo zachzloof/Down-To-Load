@@ -1,6 +1,6 @@
 {
   "name": "down-to-load",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Sort your downloads with style",
   "main": "electron/main.js",
   "scripts": {
